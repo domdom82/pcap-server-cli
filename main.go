@@ -1,6 +1,7 @@
 package main
 
 import (
+	"code.cloudfoundry.org/bytefmt"
 	"code.cloudfoundry.org/cli/plugin"
 	"crypto/tls"
 	"errors"
@@ -86,6 +87,7 @@ func (cli *PcapServerCLI) Run(cliConnection plugin.CliConnection, args []string)
 
 	if err != nil {
 		fmt.Printf("Could not get access token: %s\n", err)
+		return
 	}
 
 	req := &http.Request{
@@ -95,7 +97,7 @@ func (cli *PcapServerCLI) Run(cliConnection plugin.CliConnection, args []string)
 			"Authorization": {authToken},
 		},
 	}
-
+	fmt.Printf("Capturing traffic of app %s (%s) into file %s ...\n", appName, opts.Index, opts.File)
 	r, err := httpClient.Do(req)
 
 	if err != nil {
@@ -118,16 +120,19 @@ func (cli *PcapServerCLI) Run(cliConnection plugin.CliConnection, args []string)
 		fmt.Printf("Could not open %s for writing: %s\n", opts.File, err)
 		return
 	}
-
-	fmt.Printf("Capturing traffic of app %s into file %s ...\n", appName, opts.File)
+	totalBytes := uint64(0)
+	updateProgress := func(nBytes int) {
+		totalBytes += uint64(nBytes)
+		fmt.Printf("\033[2K\rRead %d bytes from stream (%s total)", nBytes, bytefmt.ByteSize(totalBytes))
+	}
+	updateProgress(0)
 	for {
 		buffer := make([]byte, 4096)
 		n, err := r.Body.Read(buffer)
-		if err != nil {
-			handleIOError(err)
-			return
+		updateProgress(n)
+		if n > 0 {
+			file.Write(buffer[:n])
 		}
-		_, err = file.Write(buffer[:n])
 		if err != nil {
 			handleIOError(err)
 			return
